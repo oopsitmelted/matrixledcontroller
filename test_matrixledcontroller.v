@@ -48,30 +48,32 @@ parameter RX_DROP_BAD_FRAME = RX_FRAME_FIFO;
 parameter RX_DROP_WHEN_FULL = RX_FRAME_FIFO;
 
 // Inputs
-reg rst;
-reg clk;
-reg [7:0] rx_axis_tdata;
-reg rx_axis_tkeep;
-reg rx_axis_tvalid;
-reg rx_axis_tlast;
-reg rx_axis_tuser;
+reg rst = 0;
+reg clk = 0;
+reg mii_rx_clk = 0;
+reg [3:0] mii_rxd = 0;
+reg mii_rx_dv = 0;
+reg mii_rx_er = 0;
+reg mii_tx_clk = 0;
 
 // Outputs
-output rx_axis_tready;
+wire [3:0] mii_txd;
+wire mii_tx_en;
 
 initial begin
     // myhdl integration
     $from_myhdl(
         rst,
         clk,
-        rx_axis_tdata,
-        rx_axis_tkeep,
-        rx_axis_tvalid,
-        rx_axis_tlast,
-        rx_axis_tuser
+        mii_rx_clk,
+        mii_rxd,
+        mii_rx_dv,
+        mii_rx_er,
+        mii_tx_clk
     );
     $to_myhdl(
-        rx_axis_tready
+        mii_txd,
+        mii_tx_en
     );
 
     // dump file
@@ -98,12 +100,13 @@ matrixledcontroller #(
 UUT(
     .rst(rst),
     .clk(clk),
-    .rx_axis_tdata(rx_axis_tdata),
-    .rx_axis_tkeep(rx_axis_tkeep),
-    .rx_axis_tvalid(rx_axis_tvalid),
-    .rx_axis_tready(rx_axis_tready),
-    .rx_axis_tlast(rx_axis_tlast),
-    .rx_axis_tuser(rx_axis_tuser)
+    .mii_rx_clk(mii_rx_clk),
+    .mii_rxd(mii_rxd),
+    .mii_rx_dv(mii_rx_dv),
+    .mii_rx_er(mii_rx_er),
+    .mii_tx_clk(mii_tx_clk),
+    .mii_txd(mii_txd),
+    .mii_tx_en(mii_tx_en)
 );
 
 endmodule

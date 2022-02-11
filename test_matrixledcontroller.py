@@ -29,7 +29,7 @@ import sys
 
 sys.path.append("verilog-ethernet/tb/")
 
-import axis_ep
+import mii_ep
 import eth_ep
 
 module = 'matrixledcontroller'
@@ -41,6 +41,14 @@ srcs.append("%s.v" % module)
 srcs.append("./verilog-ethernet/rtl/eth_axis_rx.v")
 srcs.append("./verilog-ethernet/lib/axis/rtl/axis_async_fifo.v")
 srcs.append("./verilog-ethernet/lib/axis/rtl/axis_async_fifo_adapter.v")
+srcs.append("./verilog-ethernet/rtl/eth_mac_mii_fifo.v")
+srcs.append("./verilog-ethernet/rtl/eth_mac_mii.v")
+srcs.append("./verilog-ethernet/rtl/eth_mac_1g.v")
+srcs.append("./verilog-ethernet/rtl/mii_phy_if.v")
+srcs.append("./verilog-ethernet/rtl/axis_gmii_rx.v")
+srcs.append("./verilog-ethernet/rtl/axis_gmii_tx.v")
+srcs.append("./verilog-ethernet/rtl/ssio_sdr_in.v")
+srcs.append("./verilog-ethernet/rtl/lfsr.v")
 srcs.append("%s.v" % testbench)
 
 src = ' '.join(srcs)
@@ -51,48 +59,44 @@ def bench():
 
     # Parameters
     TARGET = "SIM"
-    AXIS_DATA_WIDTH = 8;
-    AXIS_KEEP_ENABLE = (AXIS_DATA_WIDTH>8);
-    AXIS_KEEP_WIDTH = (AXIS_DATA_WIDTH/8);
-    ENABLE_PADDING = 1;
-    MIN_FRAME_LENGTH = 64;
-    TX_FIFO_DEPTH = 4096;
-    TX_FRAME_FIFO = 1;
-    TX_DROP_BAD_FRAME = TX_FRAME_FIFO;
-    TX_DROP_WHEN_FULL = 0;
-    RX_FIFO_DEPTH = 4096;
-    RX_FRAME_FIFO = 1;
-    RX_DROP_BAD_FRAME = RX_FRAME_FIFO;
-    RX_DROP_WHEN_FULL = RX_FRAME_FIFO;
+    AXIS_DATA_WIDTH = 8
+    AXIS_KEEP_ENABLE = (AXIS_DATA_WIDTH>8)
+    AXIS_KEEP_WIDTH = (AXIS_DATA_WIDTH/8)
+    ENABLE_PADDING = 1
+    MIN_FRAME_LENGTH = 64
+    TX_FIFO_DEPTH = 4096
+    TX_FRAME_FIFO = 1
+    TX_DROP_BAD_FRAME = TX_FRAME_FIFO
+    TX_DROP_WHEN_FULL = 0
+    RX_FIFO_DEPTH = 4096
+    RX_FRAME_FIFO = 1
+    RX_DROP_BAD_FRAME = RX_FRAME_FIFO
+    RX_DROP_WHEN_FULL = RX_FRAME_FIFO
 
     # Inputs
     clk = Signal(bool(0))
     rst = Signal(bool(0))
 
-    s_axis_tdata = Signal(intbv(0)[AXIS_DATA_WIDTH:])
-    s_axis_tkeep = Signal(intbv(1)[AXIS_KEEP_WIDTH:])
-    s_axis_tvalid = Signal(bool(0))
-    s_axis_tlast = Signal(bool(0))
-    s_axis_tuser = Signal(bool(0))
+    mii_rx_clk = Signal(bool(0))
+    mii_rxd = Signal(intbv(0)[4:])
+    mii_rx_dv = Signal(bool(0))
+    mii_rx_er = Signal(bool(0))
+    mii_tx_clk = Signal(bool(0))
+    mii_txd = Signal(intbv(0)[4:])
+    mii_tx_en = Signal(bool(0))
 
     # Outputs
-    s_axis_tready = Signal(bool(0))
 
     # sources and sinks
-    source_pause = Signal(bool(0))
-    source = axis_ep.AXIStreamSource()
+    mii_source = mii_ep.MIISource()
 
-    source_logic = source.create_logic(
-        clk=clk,
-        rst=rst,
-        tdata=s_axis_tdata,
-        tkeep=s_axis_tkeep,
-        tvalid=s_axis_tvalid,
-        tready=s_axis_tready,
-        tlast=s_axis_tlast,
-        tuser=s_axis_tuser,
-        pause=source_pause,
-        name='source'
+    mii_source_logic = mii_source.create_logic(
+        mii_rx_clk,
+        rst,
+        txd=mii_rxd,
+        tx_en=mii_rx_dv,
+        tx_er=mii_rx_er,
+        name='mii_source'
     )
 
     # DUT
@@ -103,23 +107,28 @@ def bench():
         "vvp -m myhdl %s.vvp -lxt2" % testbench,
         clk=clk,
         rst=rst,
-        rx_axis_tdata=s_axis_tdata,
-        rx_axis_tkeep=s_axis_tkeep,
-        rx_axis_tvalid=s_axis_tvalid,
-        rx_axis_tready=s_axis_tready,
-        rx_axis_tlast=s_axis_tlast,
-        rx_axis_tuser=s_axis_tuser
+        mii_rx_clk=mii_rx_clk,
+        mii_rxd=mii_rxd,
+        mii_rx_dv=mii_rx_dv,
+        mii_rx_er=mii_rx_er,
+        mii_tx_clk=mii_tx_clk,
+        mii_txd=mii_txd,
+        mii_tx_en=mii_tx_en
     )
 
     @always(delay(4))
     def clkgen():
         clk.next = not clk
+        mii_rx_clk.next = not mii_rx_clk
+        mii_tx_clk.next = not mii_tx_clk
 
     @instance
     def check():
         yield delay(100)
         yield clk.posedge
         rst.next = 1
+        yield clk.posedge
+        yield clk.posedge
         yield clk.posedge
         rst.next = 0
         yield clk.posedge
@@ -137,18 +146,16 @@ def bench():
         test_frame.eth_dest_mac = 0xDAD1D2D3D4D5
         test_frame.eth_src_mac = 0x5A5152535455
         test_frame.eth_type = 0x8000
-        test_frame.payload = bytearray(range(24))
+        test_frame.payload = bytearray(range(32))
+        test_frame.update_fcs()
 
-        axis_frame = test_frame.build_axis()
+        axis_frame = test_frame.build_axis_fcs()
 
-        source.send(axis_frame)
-
-        #yield source.wait()
-        while s_axis_tvalid:
+        mii_source.send(b'\x55\x55\x55\x55\x55\x55\x55\xD5'+bytearray(axis_frame))
+        mii_source.send(b'\x55\x55\x55\x55\x55\x55\x55\xD5'+bytearray(axis_frame))
+        for i in range(1000):
             yield clk.posedge
-        
-        for i in range(100):
-            yield clk.posedge
+            
 
         yield delay(100)
 
